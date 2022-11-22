@@ -1,4 +1,4 @@
-[![credgif-build](https://github.com/cmendible/credgif/actions/workflows/build.yaml/badge.svg)](https://github.com/cmendible/credgif/actions/workflows/build.yaml)
+![credgif-build](https://github.com/cmendible/credgif/actions/workflows/build.yaml/badge.svg)](https://github.com/cmendible/credgif/actions/workflows/build.yaml)
 
 # credgif
 
@@ -6,7 +6,7 @@ Create an animated gif using your [Credly](https://credly.com) badges.
 
 ## Usage
 
-TO generate a gif, you need to have a [Credly](https://credly.com) account and have your badges public.
+To generate a gif, you need to have a [Credly](https://credly.com) account and have your badges public.
 
 Run the following command:
 
