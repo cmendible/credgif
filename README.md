@@ -1,3 +1,5 @@
+[![credgif-build](https://github.com/cmendible/credgif/actions/workflows/build.yaml/badge.svg)](https://github.com/cmendible/credgif/actions/workflows/build.yaml)
+
 # credgif
 
 Create an animated gif using your [Credly](https://credly.com) badges.
