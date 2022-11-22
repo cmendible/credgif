@@ -24,7 +24,7 @@ jobs:
       PROJECT_NAME: credgif
     strategy:
       matrix:
-        os: [ubuntu-latest, windows-latest, macOS-latest]
+        os: [ubuntu-latest, windows-latest, macos-latest]
         target_arch: [amd64]
         include:
           - os: ubuntu-latest
@@ -41,73 +41,101 @@ jobs:
         uses: actions/setup-go@v2.1.3
         with:
           go-version: ${{ env.GOVER }}
+
       - name: Check out code into the Go module directory
         uses: actions/checkout@v2
+
+      - name: Setup .NET Core
+        uses: actions/setup-dotnet@v1
+        with:
+          dotnet-version: 6.0.x
+
+      - name: Setup MinVer
+        run: |
+          dotnet tool install --global minver-cli --version 4.2.0
+
+      - name: Calculate Version
+        run: |
+          echo "MINVERVERSIONOVERRIDE=$($HOME/.dotnet/tools/minver -t v. -m 1.0 -d preview)" >> $GITHUB_ENV
+        if: matrix.os != 'windows-latest'
+
+      - name: Calculate Version Windows
+        run: |
+          echo "MINVERVERSIONOVERRIDE=$(minver -t v. -m 1.0 -d preview)" >> $env:GITHUB_ENV
+        if: matrix.os == 'windows-latest'
+
       - name: Create output folder
         run: |
           mkdir -p ${{ env.ARCHIVE_OUTDIR }}/${{ matrix.target_os }}
+
       - name: Run build and archive non windows binaries
         if: matrix.target_os != 'windows'
         run: |
           GOOS=${{ matrix.target_os }} GOARCH=${{ matrix.target_arch }} go build -ldflags "-s -w" -o ${{ env.ARCHIVE_OUTDIR }}/${{ matrix.target_os }}/${{ matrix.filename }} ./cmd/
+      
       - name: Run build and archive windows binaries
         if: matrix.target_os == 'windows'
         run: |
           go build -ldflags "-s -w" -o ${{ env.ARCHIVE_OUTDIR }}/${{ matrix.target_os }}/${{ matrix.filename }} ./cmd/
-      - name: upload artifacts
-        uses: actions/upload-artifact@master
+          
+      - name: Upload Artifacts
+        uses: actions/upload-artifact@v3
         with:
-          name: ${{ env.PROJECT_NAME }}_${{ matrix.target_os }}_${{ matrix.target_arch }}
-          path: ${{ env.ARCHIVE_OUTDIR }}/${{ matrix.target_os }}
+          name: ${{ env.PROJECT_NAME }}-${{ matrix.os }}-${{ matrix.target_arch }}
+          path: ${{ env.ARCHIVE_OUTDIR }}/${{ matrix.target_os }}/${{ matrix.filename }}
+
+  release:
+    name: Create Release
+    needs: build
+    if: github.event_name != 'pull_request' && startswith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    outputs:
+      upload_url: ${{ steps.create_release.outputs.upload_url }}
+    steps:
+      - name: release
+        uses: actions/create-release@v1
+        id: create_release
+        with:
+          draft: false
+          prerelease: false
+          release_name: ${{ env.MINVERVERSIONOVERRIDE }}
+          tag_name: ${{ github.ref }}
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+
   publish:
     name: Publish binaries
-    needs: build
-    if: github.event_name != 'pull_request'
+    needs: release
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        target_arch: [amd64]
+    if: github.event_name != 'pull_request' && startswith(github.ref, 'refs/tags/v') 
     env:
-      ARTIFACT_DIR: ./release
+      ARTIFACT_DIR: ${{ github.workspace }}/release
       PROJECT_NAME: credgif
     runs-on: ubuntu-latest
     steps:
-      - name: Check out code into the Go module directory
+      - name: Check out code
         uses: actions/checkout@v2
-      - name: download artifacts - ${{ env.PROJECT_NAME }}_linux_amd64
+
+      - name: download artifacts - ${{ env.PROJECT_NAME }}-${{ matrix.os }}-${{ matrix.target_arch }}
         uses: actions/download-artifact@master
         with:
-          name: ${{ env.PROJECT_NAME }}_linux_amd64
-          path: ${{ env.ARTIFACT_DIR }}
-      - name: download artifacts - ${{ env.PROJECT_NAME }}_windows_amd64
-        uses: actions/download-artifact@master
-        with:
-          name: ${{ env.PROJECT_NAME }}_windows_amd64
-          path: ${{ env.ARTIFACT_DIR }}
-      - name: download artifacts - ${{ env.PROJECT_NAME }}_darwin_amd64
-        uses: actions/download-artifact@master
-        with:
-          name: ${{ env.PROJECT_NAME }}_darwin_amd64
-          path: ${{ env.ARTIFACT_DIR }}
-      - name: publish binaries to github
-        if: startswith(github.ref, 'refs/tags/v')
+          name: ${{ env.PROJECT_NAME }}-${{ matrix.os }}-${{ matrix.target_arch }}
+          path: ${{ env.ARTIFACT_DIR }}/${{ env.PROJECT_NAME }}-${{ matrix.os }}-${{ matrix.target_arch }}/
+
+      - name: Zip files
+        working-directory: ${{ env.ARTIFACT_DIR }}/${{ env.PROJECT_NAME }}-${{ matrix.os }}-${{ matrix.target_arch }}/
         run: |
-          echo "installing github-release-cli..."
-          sudo npm install --silent --no-progress -g @babel/runtime
-          sudo npm install --silent --no-progress -g github-release-cli
+          zip -r ${{ github.workspace }}/${{ env.PROJECT_NAME }}-${{ matrix.os }}-${{ matrix.target_arch }}.zip *
 
-          # Get the list of files
-          RELEASE_ARTIFACT=(${ARTIFACT_DIR}/*)
-
-          # Parse repository to get owner and repo names
-          OWNER_NAME="${GITHUB_REPOSITORY%%/*}"
-          REPO_NAME="${GITHUB_REPOSITORY#*/}"
-
-          REL_VERSION="0.1.0"
-          RELEASE_BODY="This is the release candidate ${REL_VERSION}"
-
-          export GITHUB_TOKEN=${{ secrets.GITHUB_TOKEN }}
-          echo "Uploading ${{ env.PROJECT_NAME }} Binaries to GitHub Release"
-          github-release upload \
-            --owner $OWNER_NAME --repo $REPO_NAME \
-            --tag "v${REL_VERSION}" \
-            --release-name "${{ env.PROJECT_NAME }} v${REL_VERSION}" \
-            --body "${RELEASE_BODY}" \
-            --prerelease true \
-            ${RELEASE_ARTIFACT[*]}
+      - name: upload linux artifact
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        with:
+          upload_url: ${{ needs.release.outputs.upload_url }}
+          asset_path: ${{ github.workspace }}/${{ env.PROJECT_NAME }}-${{ matrix.os }}-${{ matrix.target_arch }}.zip
+          asset_name: ${{ env.PROJECT_NAME }}-${{ matrix.os }}-${{ matrix.target_arch }}.zip
+          asset_content_type: application/gzip
